@@ -26,7 +26,6 @@ __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     particle.ay += coef * dy;
 }
 
-// **OPTIMIZED**: Use shared memory and only access nearby bins
 __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int* bins, int num_bins_per_row, int num_bins) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts)
@@ -91,7 +90,6 @@ void init_simulation(particle_t* parts, int num_parts, double size) {
     blks = (num_parts + NUM_THREADS - 1) / NUM_THREADS;
 }
 
-// **OPTIMIZED**: Reduce binning overhead with Thrust sorting
 __global__ void computeBinIDs(int *bin_ids, particle_t *parts, int num_parts, double size) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     if (i < num_parts) {
@@ -108,7 +106,6 @@ __global__ void countParticlesPerBin(int *bin_counts, int *bin_ids, int num_part
     }
 }
 
-// **OPTIMIZED**: Use prefix sum for efficient bin allocation
 __global__ void assignParticlesToBins(particle_t *sorted_parts, int *bins, particle_t *parts, int *bin_ids, int num_parts) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     if (i < num_parts) {
