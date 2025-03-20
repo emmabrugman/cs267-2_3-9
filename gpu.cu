@@ -2,7 +2,7 @@
 #include <thrust/scan.h>
 #include "common.h"
 #include <cuda.h>
-#include <stdio.h>
+#include <stdio.h> // Needed for debugging
 
 #define NUM_THREADS 256
 #define BIN_SIZE 0.01 
@@ -24,6 +24,7 @@ __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     particle.ay += coef * dy;
 }
 
+// Optimized compute forces with shared memory and halo interactions
 __global__ void compute_forces_gpu(particle_t* particles, int num_parts, int* bins, int num_bins_per_row, int num_bins) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid >= num_parts)
@@ -110,16 +111,30 @@ __global__ void assignParticlesToBins(particle_t *sorted_parts,
                                       int *bins, 
                                       particle_t *parts, 
                                       int *bin_ids, 
-                                      int num_parts) {
+                                      int num_parts,
+                                      int num_bins_per_row, 
+                                      int num_bins) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     if (i < num_parts) {
         int bin_id = bin_ids[i];
 
-        int insert_idx = atomicAdd(&bins[bin_id], 1);
-        sorted_parts[insert_idx] = parts[i];
+        int bx = bin_id % num_bins_per_row;
+        int by = bin_id / num_bins_per_row;
+
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                int nbx = bx + dx;
+                int nby = by + dy;
+
+                if (nbx >= 0 && nbx < num_bins_per_row && nby >= 0 && nby < num_bins_per_row) {
+                    int neighbor_bin = nbx + nby * num_bins_per_row;
+                    int insert_idx = atomicAdd(&bins[neighbor_bin], 1);
+                    sorted_parts[insert_idx] = parts[i];
+                }
+            }
+        }         
     }
 }
-
 
 void simulate_one_step(particle_t* parts, int num_parts, double size) {
     int num_bins_per_row = (int)ceil(size / BIN_SIZE);
@@ -171,4 +186,3 @@ void simulate_one_step(particle_t* parts, int num_parts, double size) {
     cudaFree(bin_counts);
     cudaFree(bins);
 }
-
