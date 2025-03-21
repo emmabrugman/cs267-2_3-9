@@ -212,8 +212,7 @@ cudaMalloc(&sorted_ids_gpu, num_parts * sizeof(int));
     thrust::exclusive_scan(bin_counts.begin(), bin_counts.end(), bin_prefix.begin());
     bin_prefix[num_bins] = num_parts;
 
-    // Sort particles by bin
-// Step 3: Sort particles by bin (updated kernel call)
+// Sort particles by bin 
 bin_sort_kernel<<<blks, NUM_THREADS>>>(
     parts_gpu, sorted_particles_gpu, particle_ids_gpu, sorted_ids_gpu,
     num_parts, thrust::raw_pointer_cast(bin_prefix.data()),
