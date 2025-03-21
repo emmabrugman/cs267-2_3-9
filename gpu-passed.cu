@@ -8,7 +8,7 @@
 
 int blks;
 
-// Device function (unchanged)
+
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
@@ -28,7 +28,6 @@ __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
 
     
 }
-// Kernels provided previously (unchanged)
 
 __global__ void move_gpu(particle_t* particles, int num_parts, double size) {
 
@@ -81,13 +80,13 @@ __global__ void bin_count_kernel(particle_t* particles, int num_parts, int* bin_
 
     atomicAdd(&bin_counts[bin_id], 1);
 
-    // if (tid < 1000) {  // Limit output to first 10 particles
+    // if (tid < 1000) {  
     //     printf("[Bin Count] Particle %d -> Bin (%d, %d), Bin ID = %d\n", tid, bin_x, bin_y, bin_id);
     // }
 }
 
 
-// Particle Sorting into bins (Step 3)
+// Particle Sorting into bins 
 __global__ void bin_sort_kernel(particle_t* particles, particle_t* sorted_particles, 
     int* particle_ids, int* sorted_ids,
     int num_parts, int* bin_prefix, int* bin_offsets, 
@@ -151,7 +150,7 @@ __global__ void compute_forces_gpu(
                         if (!same_bin || (same_bin && i != j)) {
                             apply_force_gpu(*p, sorted_particles[j]);
 
-                            // Correct debugging statement here:
+                            // DEBUGG
                             // if (bin_id == 0 && (i - bin_start) == 0 && neighbor_bin_id < 3) {
                             //     particle_t neighbor_p = sorted_particles[j];
                             //     printf("[DEBUG NEIGHBOR] Bin 0 Particle %d interacts with Neighbor Bin %d Particle %d (%.5f, %.5f)\n", 
@@ -206,35 +205,35 @@ cudaMalloc(&sorted_ids_gpu, num_parts * sizeof(int));
     particle_t* sorted_particles_gpu;
     cudaMalloc(&sorted_particles_gpu, num_parts * sizeof(particle_t));
 
-    // Step 1: Count particles per bin
+    // Count particles per bin
     bin_count_kernel<<<blks, NUM_THREADS>>>(parts_gpu, num_parts, thrust::raw_pointer_cast(bin_counts.data()), bins_per_row, bin_size);
 
-    // Step 2: Compute prefix sums
+    //  Compute prefix sums
     thrust::exclusive_scan(bin_counts.begin(), bin_counts.end(), bin_prefix.begin());
     bin_prefix[num_bins] = num_parts;
 
-    // Step 3: Sort particles by bin
+    // Sort particles by bin
 // Step 3: Sort particles by bin (updated kernel call)
 bin_sort_kernel<<<blks, NUM_THREADS>>>(
     parts_gpu, sorted_particles_gpu, particle_ids_gpu, sorted_ids_gpu,
     num_parts, thrust::raw_pointer_cast(bin_prefix.data()),
     thrust::raw_pointer_cast(bin_offsets.data()), bins_per_row, bin_size);
 
-    // Step 4: Compute forces (bin-based)
+    // Compute forces (bin-based)
     int bin_blocks = (num_bins + NUM_THREADS - 1) / NUM_THREADS;
     compute_forces_gpu<<<bin_blocks, NUM_THREADS>>>(sorted_particles_gpu, num_parts, thrust::raw_pointer_cast(bin_prefix.data()), bins_per_row, bin_size);
 
-    // Step 5: Move particles (unchanged)
+    // Move particles 
     move_gpu<<<blks, NUM_THREADS>>>(sorted_particles_gpu, num_parts, size);
 
 
 
-// After GPU kernels finish (at the very end of simulate_one_step)
+// After GPU kernels finish
 
 // Copy sorted particles and sorted IDs back to CPU
 // After GPU kernels finish (at the very end of simulate_one_step)
 
-// Reordering step (unchanged, as above)
+// Reordering step 
 std::vector<particle_t> sorted_particles_host(num_parts);
 std::vector<int> sorted_ids_host(num_parts);
 
@@ -251,7 +250,7 @@ cudaMemcpy(parts_gpu, reordered_particles.data(), num_parts * sizeof(particle_t)
 std::vector<particle_t> host_particles(50);
 cudaMemcpy(host_particles.data(), parts_gpu, 50 * sizeof(particle_t), cudaMemcpyDeviceToHost);
 
-// Compute average distance correctly now
+// Compute average distance 
 double avg_distance = 0.0;
 int count = 0;
 for (int i = 0; i < 50; i++) {
