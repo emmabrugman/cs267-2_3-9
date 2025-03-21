@@ -1,3 +1,5 @@
+
+#include "common.h"
 #include <cuda.h>
 #include <thrust/device_vector.h>
 #include <thrust/scan.h>
@@ -6,7 +8,6 @@
 
 int blks;
 
-// Device function (unchanged)
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
@@ -24,9 +25,8 @@ __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     particle.ax += coef * dx;
     particle.ay += coef * dy;
 
-
+    
 }
-// Kernels provided previously (unchanged)
 
 __global__ void move_gpu(particle_t* particles, int num_parts, double size) {
 
@@ -56,7 +56,9 @@ __global__ void move_gpu(particle_t* particles, int num_parts, double size) {
         p->y = p->y < 0 ? -(p->y) : 2 * size - p->y;
         p->vy = -(p->vy);
 
+        
     }
+
     // if (tid < 10) {
     //     printf("[Move] Particle %d new pos: (%.5e, %.5e), vel: (%.5e, %.5e)\n",
     //         tid, p->x, p->y, p->vx, p->vy);
@@ -66,7 +68,7 @@ __global__ void move_gpu(particle_t* particles, int num_parts, double size) {
 
 
 
-// Bin Counting (Step 1)
+// Bin Counting 
 __global__ void bin_count_kernel(particle_t* particles, int num_parts, int* bin_counts, int bins_per_row, double bin_size) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= num_parts) return;
@@ -83,10 +85,10 @@ __global__ void bin_count_kernel(particle_t* particles, int num_parts, int* bin_
 }
 
 
-// Particle Sorting into bins (Step 3)
-__global__ void bin_sort_kernel(particle_t* particles, particle_t* sorted_particles,
+// Particle Sorting into bins 
+__global__ void bin_sort_kernel(particle_t* particles, particle_t* sorted_particles, 
     int* particle_ids, int* sorted_ids,
-    int num_parts, int* bin_prefix, int* bin_offsets,
+    int num_parts, int* bin_prefix, int* bin_offsets, 
     int bins_per_row, double bin_size) {
 int tid = blockIdx.x * blockDim.x + threadIdx.x;
 if (tid >= num_parts) return;
@@ -126,27 +128,26 @@ __global__ void compute_forces_gpu(
     int bin_y = bin_id / bins_per_row;
 
     for (int i = bin_start; i < bin_end; i++) {
-        particle_t p = sorted_particles[i];
-
-        p.ax = 0.0;
-        p.ay = 0.0;
-
+        particle_t* p = &sorted_particles[i];  // Pointer to particle directly in global memory
+        p->ax = 0.0;
+        p->ay = 0.0;
+        
         for (int dx = -1; dx <= 1; dx++) {
             for (int dy = -1; dy <= 1; dy++) {
                 int nx = bin_x + dx;
                 int ny = bin_y + dy;
-
+        
                 if (nx >= 0 && ny >= 0 && nx < bins_per_row && ny < bins_per_row) {
                     int neighbor_bin_id = nx + ny * bins_per_row;
-
+        
                     int neigh_start = bin_prefix[neighbor_bin_id];
                     int neigh_end = bin_prefix[neighbor_bin_id + 1];
-
+        
                     bool same_bin = (neighbor_bin_id == bin_id);
-
+        
                     for (int j = neigh_start; j < neigh_end; j++) {
                         if (!same_bin || (same_bin && i != j)) {
-                            apply_force_gpu(p, sorted_particles[j]);
+                            apply_force_gpu(*p, sorted_particles[j]);
 
                             // Correct debugging statement here:
                             // if (bin_id == 0 && (i - bin_start) == 0 && neighbor_bin_id < 3) {
@@ -159,8 +160,10 @@ __global__ void compute_forces_gpu(
                 }
             }
         }
-       sorted_particles[i].ax = p.ax;
-        sorted_particles[i].ay = p.ay;
+
+        sorted_particles[i].ax = p->ax;
+        sorted_particles[i].ay = p->ay;
+        
 
         // if (bin_id == 0 && (i - bin_start) < 3) {
         //     printf("[DEBUG FORCES FIXED] Bin %d, Particle %d ax=%.5e ay=%.5e\n",
@@ -168,6 +171,9 @@ __global__ void compute_forces_gpu(
         // }
     }
 }
+
+
+
 
 void init_simulation(particle_t* parts, int num_parts, double size) {
     blks = (num_parts + NUM_THREADS - 1) / NUM_THREADS;
@@ -199,31 +205,32 @@ cudaMalloc(&sorted_ids_gpu, num_parts * sizeof(int));
     particle_t* sorted_particles_gpu;
     cudaMalloc(&sorted_particles_gpu, num_parts * sizeof(particle_t));
 
-    // Step 1: Count particles per bin
+    // Count particles per bin
     bin_count_kernel<<<blks, NUM_THREADS>>>(parts_gpu, num_parts, thrust::raw_pointer_cast(bin_counts.data()), bins_per_row, bin_size);
 
-    // Step 2: Compute prefix sums
+    // Compute prefix sums
     thrust::exclusive_scan(bin_counts.begin(), bin_counts.end(), bin_prefix.begin());
     bin_prefix[num_bins] = num_parts;
 
-    // Step 3: Sort particles by bin
-// Step 3: Sort particles by bin (updated kernel call)
+// Sort particles by bin (updated kernel call)
 bin_sort_kernel<<<blks, NUM_THREADS>>>(
     parts_gpu, sorted_particles_gpu, particle_ids_gpu, sorted_ids_gpu,
     num_parts, thrust::raw_pointer_cast(bin_prefix.data()),
     thrust::raw_pointer_cast(bin_offsets.data()), bins_per_row, bin_size);
 
-    // Compute forces (bin-based)
+    // Compute forces 
     int bin_blocks = (num_bins + NUM_THREADS - 1) / NUM_THREADS;
     compute_forces_gpu<<<bin_blocks, NUM_THREADS>>>(sorted_particles_gpu, num_parts, thrust::raw_pointer_cast(bin_prefix.data()), bins_per_row, bin_size);
 
-    //  Move particles
+    // Move particles 
     move_gpu<<<blks, NUM_THREADS>>>(sorted_particles_gpu, num_parts, size);
 
 
 
+// After GPU kernels finish 
+// Copy sorted particles and sorted IDs back to CPU
 
-// Reordering step
+// Reordering step 
 std::vector<particle_t> sorted_particles_host(num_parts);
 std::vector<int> sorted_ids_host(num_parts);
 
@@ -236,12 +243,9 @@ for (int i = 0; i < num_parts; i++)
 
 cudaMemcpy(parts_gpu, reordered_particles.data(), num_parts * sizeof(particle_t), cudaMemcpyHostToDevice);
 
-
-  //distance calc
 std::vector<particle_t> host_particles(50);
 cudaMemcpy(host_particles.data(), parts_gpu, 50 * sizeof(particle_t), cudaMemcpyDeviceToHost);
 
-// Compute average distance correctly now
 double avg_distance = 0.0;
 int count = 0;
 for (int i = 0; i < 50; i++) {
@@ -254,7 +258,7 @@ for (int i = 0; i < 50; i++) {
 }
 avg_distance /= count;
 
-// Print and check the assertion now
+// Print and check the assertion 
 printf("[Average Distance] First 50 particles: %.5e\n", avg_distance);
 assert(avg_distance < 50.0);
 
@@ -267,4 +271,5 @@ cudaFree(particle_ids_gpu);
 
 
 }
+
 
