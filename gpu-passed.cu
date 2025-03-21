@@ -8,7 +8,6 @@
 
 int blks;
 
-
 __device__ void apply_force_gpu(particle_t& particle, particle_t& neighbor) {
     double dx = neighbor.x - particle.x;
     double dy = neighbor.y - particle.y;
@@ -69,7 +68,7 @@ __global__ void move_gpu(particle_t* particles, int num_parts, double size) {
 
 
 
-// Bin Counting (Step 1)
+// Bin Counting 
 __global__ void bin_count_kernel(particle_t* particles, int num_parts, int* bin_counts, int bins_per_row, double bin_size) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= num_parts) return;
@@ -80,7 +79,7 @@ __global__ void bin_count_kernel(particle_t* particles, int num_parts, int* bin_
 
     atomicAdd(&bin_counts[bin_id], 1);
 
-    // if (tid < 1000) {  
+    // if (tid < 1000) {  // Limit output to first 10 particles
     //     printf("[Bin Count] Particle %d -> Bin (%d, %d), Bin ID = %d\n", tid, bin_x, bin_y, bin_id);
     // }
 }
@@ -150,7 +149,7 @@ __global__ void compute_forces_gpu(
                         if (!same_bin || (same_bin && i != j)) {
                             apply_force_gpu(*p, sorted_particles[j]);
 
-                            // DEBUGG
+                            // Correct debugging statement here:
                             // if (bin_id == 0 && (i - bin_start) == 0 && neighbor_bin_id < 3) {
                             //     particle_t neighbor_p = sorted_particles[j];
                             //     printf("[DEBUG NEIGHBOR] Bin 0 Particle %d interacts with Neighbor Bin %d Particle %d (%.5f, %.5f)\n", 
@@ -162,8 +161,9 @@ __global__ void compute_forces_gpu(
             }
         }
 
-        sorted_particles[i].ax = p.ax;
-        sorted_particles[i].ay = p.ay;
+        sorted_particles[i].ax = p->ax;
+        sorted_particles[i].ay = p->ay;
+        
 
         // if (bin_id == 0 && (i - bin_start) < 3) {
         //     printf("[DEBUG FORCES FIXED] Bin %d, Particle %d ax=%.5e ay=%.5e\n",
@@ -208,17 +208,17 @@ cudaMalloc(&sorted_ids_gpu, num_parts * sizeof(int));
     // Count particles per bin
     bin_count_kernel<<<blks, NUM_THREADS>>>(parts_gpu, num_parts, thrust::raw_pointer_cast(bin_counts.data()), bins_per_row, bin_size);
 
-    //  Compute prefix sums
+    // Compute prefix sums
     thrust::exclusive_scan(bin_counts.begin(), bin_counts.end(), bin_prefix.begin());
     bin_prefix[num_bins] = num_parts;
 
-// Sort particles by bin 
+// Sort particles by bin (updated kernel call)
 bin_sort_kernel<<<blks, NUM_THREADS>>>(
     parts_gpu, sorted_particles_gpu, particle_ids_gpu, sorted_ids_gpu,
     num_parts, thrust::raw_pointer_cast(bin_prefix.data()),
     thrust::raw_pointer_cast(bin_offsets.data()), bins_per_row, bin_size);
 
-    // Compute forces (bin-based)
+    // Compute forces 
     int bin_blocks = (num_bins + NUM_THREADS - 1) / NUM_THREADS;
     compute_forces_gpu<<<bin_blocks, NUM_THREADS>>>(sorted_particles_gpu, num_parts, thrust::raw_pointer_cast(bin_prefix.data()), bins_per_row, bin_size);
 
@@ -227,10 +227,8 @@ bin_sort_kernel<<<blks, NUM_THREADS>>>(
 
 
 
-// After GPU kernels finish
-
+// After GPU kernels finish 
 // Copy sorted particles and sorted IDs back to CPU
-// After GPU kernels finish (at the very end of simulate_one_step)
 
 // Reordering step 
 std::vector<particle_t> sorted_particles_host(num_parts);
@@ -245,11 +243,9 @@ for (int i = 0; i < num_parts; i++)
 
 cudaMemcpy(parts_gpu, reordered_particles.data(), num_parts * sizeof(particle_t), cudaMemcpyHostToDevice);
 
-// Now correctly copy back reordered particles for distance calculation
 std::vector<particle_t> host_particles(50);
 cudaMemcpy(host_particles.data(), parts_gpu, 50 * sizeof(particle_t), cudaMemcpyDeviceToHost);
 
-// Compute average distance 
 double avg_distance = 0.0;
 int count = 0;
 for (int i = 0; i < 50; i++) {
@@ -262,7 +258,7 @@ for (int i = 0; i < 50; i++) {
 }
 avg_distance /= count;
 
-// Print and check the assertion now
+// Print and check the assertion 
 printf("[Average Distance] First 50 particles: %.5e\n", avg_distance);
 assert(avg_distance < 50.0);
 
@@ -275,3 +271,4 @@ cudaFree(particle_ids_gpu);
 
 
 }
+
